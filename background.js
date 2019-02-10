@@ -1,5 +1,7 @@
 let akStatusCache = {};
 
+let confirmedNotEdgeIps = [];
+
 let cnameCache = {};
 
 let iconPath = {
@@ -18,6 +20,7 @@ let info = i = {
     akCookieNamePrefixes: [
         "akacd"
     ],
+    akErrorString: "The requested URL \"&#91;no&#32;URL&#93;\", is invalid.<p>",
     akHeaderNames: [
         "x-akamai-pragma-client-ip",
         "x-akamai-request-id",
@@ -154,6 +157,28 @@ async function akStatusFromDns(host, ip) {
     return status;
 }
 
+async function akStatusFromIpGet(ip) {
+    let status = null;
+    if (confirmedNotEdgeIps.includes(ip)) {
+        return status;
+    }
+    let url = "http://" + ip; 
+    try {
+        let response = await fetch(url, {
+            redirect: "error"
+        });
+        let text = await response.text();
+        if (text.includes(i.akErrorString)) {
+            status = "production";
+        }
+    } finally {
+        if (!status) {
+            confirmedNotEdgeIps.push(ip);
+        }
+    }
+    return status;
+}
+
 function akStatusFromResponseHeaders(responseHeaders) {
     let status = null;
     if (akHeaderDetected(responseHeaders) || akCookieDetected(responseHeaders)) {
@@ -192,7 +217,7 @@ async function cnameChain(host) {
     }
     chain = [];
     let urlBase = "https://cloudflare-dns.com/dns-query?name=";
-    let url = urlBase.concat(host)
+    let url = urlBase + host;
     let response = await fetch(url, {
         headers: {
             "accept": "application/dns-json"
@@ -226,9 +251,12 @@ async function detectAkamai(response) {
     let status = akStatusFromResponseHeaders(response.responseHeaders);
     if (!status) {
         status = await akStatusFromDns(host, response.ip);
-        if (!status) {
-            return;
-        }
+    }
+    if (!status) {
+        status = await akStatusFromIpGet(response.ip);
+    }
+    if (!status) {
+        return;
     }
     akStatusCache[host] = status;
     updateIcon();
